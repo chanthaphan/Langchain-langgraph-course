@@ -1,0 +1,8 @@
+langchain
+langchain[anthropic]
+langgraph
+langgraph-checkpoint-sqlite
+python-dotenv
+# เพิ่มตอนถึง Level 8 (RAG):
+# langchain-text-splitters
+# langchain-community
