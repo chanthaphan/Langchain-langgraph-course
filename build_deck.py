@@ -59,10 +59,13 @@ def box(s, x, y, w, h, fill=None, line=None, lw=1.0, shape=MSO_SHAPE.ROUNDED_REC
     else: sp.fill.solid(); sp.fill.fore_color.rgb = fill
     _set_line(sp, line, lw); sp.shadow.inherit = False
     if shadow:
-        el = sp._element.spPr; ef = el.makeelement(qn('a:effectLst'), {})
-        sh = el.makeelement(qn('a:outerShdw'), {'blurRad':'60000','dist':'30000','dir':'5400000','rotWithShape':'0'})
-        clr = el.makeelement(qn('a:srgbClr'), {'val':'1A2230'}); a = el.makeelement(qn('a:alpha'), {'val':'30000'})
-        clr.append(a); sh.append(clr); ef.append(sh); el.append(ef)
+        spPr = sp._element.spPr
+        ef = spPr.find(qn('a:effectLst'))          # inherit=False already created one
+        if ef is None:
+            ef = spPr.makeelement(qn('a:effectLst'), {}); spPr.append(ef)
+        sh = ef.makeelement(qn('a:outerShdw'), {'blurRad':'60000','dist':'30000','dir':'5400000','rotWithShape':'0'})
+        clr = ef.makeelement(qn('a:srgbClr'), {'val':'1A2230'}); a = ef.makeelement(qn('a:alpha'), {'val':'30000'})
+        clr.append(a); sh.append(clr); ef.append(sh)
     if radius is not None and shape == MSO_SHAPE.ROUNDED_RECTANGLE:
         try: sp.adjustments[0] = radius
         except Exception: pass
