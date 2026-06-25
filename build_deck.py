@@ -28,7 +28,7 @@ MUTE      = RGBColor(0x8A, 0x93, 0x9F)
 
 prs = Presentation(); prs.slide_width = Inches(13.333); prs.slide_height = Inches(7.5)
 BLANK = prs.slide_layouts[6]; FONT = "Calibri"; MONO = "Consolas"
-TOTAL = 17
+TOTAL = 18
 
 # ---------------------------------------------------------------- helpers
 def slide(): return prs.slides.add_slide(BLANK)
@@ -140,9 +140,12 @@ def minichain(s, active=set(), guard=False, y=1.3):
     arrow(s, dbx+dbw/2, y+nh, dbx+dbw/2, y+0.92, color=(GOLD if on else RGBColor(0xC4,0xCC,0xD6)), w=(3.0 if on else 1.5), bi=True)
     db=box(s,dbx,y+0.92,dbw,0.5,fill=(GREEN if on else blend(GREEN,0.7)),line=(GOLD if on else None),lw=2.5,shadow=on,shape=MSO_SHAPE.CAN)
     boxtext(db,[{'t':"🗄️ DATABASE",'s':9.5,'c':(WHITE if on else MUTE),'b':True}])
-    if guard:
+    if guard=='EDGE':
         icon_circle(s, 3.04, y-0.26, 0.42, "🛡️", RED, WHITE, 12)
         text(s, 2.5, y+0.62, 1.5, 0.3, [{'t':"guardrail",'s':8,'c':RED,'b':True,'a':PP_ALIGN.CENTER}])
+    elif guard=='HUB':
+        icon_circle(s, 8.62, y-0.26, 0.42, "🛡️", RED, WHITE, 12)
+        text(s, 7.85, y+0.62, 1.75, 0.3, [{'t':"PII guardrail",'s':8,'c':RED,'b':True,'a':PP_ALIGN.CENTER}])
 
 # ---------- example-card frame ----------
 EX_X, EX_Y, EX_W, EX_H = 7.45, 3.0, 5.35, 3.55
@@ -243,27 +246,69 @@ boxtext(lc, [{'t':"🛡️ Guardrails at the client edge — no PII redaction he
 rc = box(s, 7.3, 6.5, 3.1, 0.55, fill=GOLD_LT, line=GOLD, lw=1.0, radius=0.1)
 boxtext(rc, [{'t':"🎭 PII redacted & re-inserted only at the AI Hub",'s':9,'c':INK}], ml=0.1, mr=0.1)
 
-# ================================================================ STEP SLIDES (4–14)
+# ================================================================ SLIDE 4 — Sequence diagram
+s = slide(); header(s, "END-TO-END", "Sequence Diagram — One Request, Start to Finish", 4)
+text(s, 0.55, 1.16, 12.3, 0.3, [{'t':[("The 11 steps as message exchanges.   ",GREY,False,True),("🛡️ = guardrail (input · PII redact · PII re-insert · output).",RED,True,False)],'s':11.5}])
+seq_actors=[("💻 CLIENT",BLUE),("🤖 AI AGENTS",TEAL),("🏛️ AI HUB",GOLD),("🧠 LLM",PURPLE),("🗄️ DATABASE",GREEN)]
+sx=[1.55,4.25,7.0,9.55,11.95]
+stop=1.78; sbot=6.98
+for (lbl,clr),x in zip(seq_actors,sx):
+    h=box(s, x-0.95, stop, 1.9, 0.5, fill=clr, line=None, shadow=True, radius=0.3)
+    boxtext(h,[{'t':lbl,'s':10.5,'c':(NAVY if clr==GOLD else WHITE),'b':True}])
+    ll=s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x),Inches(stop+0.5),Inches(x),Inches(sbot))
+    ll.line.color.rgb=RGBColor(0xC4,0xCC,0xD6); ll.line.width=Pt(1.1); ll.shadow.inherit=False
+    led=ll.line._get_or_add_ln(); led.append(led.makeelement(qn('a:prstDash'),{'val':'dash'}))
+# messages: (from, to, label, guard, ret)
+seq=[(0,1,"1  request",True,False),
+     (1,1,"2  route → Retrieval Agent",False,False),
+     (1,2,"3  request SQL generation",False,False),
+     (2,2,"4  tokens · PII redact",True,False),
+     (2,3,"5  generate SQL (redacted)",False,False),
+     (3,2,"SQL",False,True),
+     (2,2,"6  PII re-insert",True,False),
+     (2,1,"7  return SQL",False,False),
+     (1,4,"8  run SQL",False,False),
+     (4,1,"rows",False,True),
+     (1,1,"9  analyse & write answer",False,False),
+     (1,1,"10  output guardrail",True,False),
+     (1,0,"11  show result",False,False)]
+yy=stop+0.72; dy=0.345
+for a,b,lbl,guard,ret in seq:
+    clr = RED if guard else (seq_actors[a][1] if not ret else GREY)
+    if a==b:
+        bx=sx[a]
+        box(s, bx, yy-0.06, 0.55, 0.28, fill=None, line=clr, lw=1.6, shape=MSO_SHAPE.LEFT_BRACE)
+        if guard: icon_circle(s, bx-0.34, yy-0.07, 0.3, "🛡️", RED, WHITE, 9)
+        text(s, bx+0.62, yy-0.1, 5.2, 0.3, [{'t':lbl,'s':9.5,'c':(RED if guard else INK),'b':True}])
+    else:
+        x1,x2=sx[a],sx[b]
+        arrow(s, x1, yy+0.08, x2, yy+0.08, color=clr, w=(2.0 if not ret else 1.4), dash=('dash' if ret else None))
+        if guard: icon_circle(s, (x1+x2)/2-0.15, yy-0.2, 0.3, "🛡️", RED, WHITE, 9)
+        text(s, min(x1,x2)+0.05, yy-0.16, abs(x2-x1)+0.1, 0.28,
+             [{'t':lbl,'s':9.5,'c':(RED if guard else INK),'b':(not ret),'i':ret,'a':PP_ALIGN.CENTER}])
+    yy+=dy
+
+# ================================================================ STEP SLIDES (5–15)
 STEPS = [
- (1,{'CLIENT'},True,BLUE,"User Sends a Request","Client submits the prompt; the first input guardrail runs",
+ (1,{'CLIENT'},'EDGE',BLUE,"User Sends a Request","🛡️ Guardrail — client submits the prompt; first input guardrail runs",
     ["User types a natural-language question in the chat app.","Input guardrail checks content, policy & prompt-injection.","No PII redaction at this step — that happens at the AI Hub.","Clean requests are passed to the AI Agents."]),
  (2,{'AGENTS'},False,TEAL,"Router Agent Plans the Work","Router understands intent and routes to the Data Retrieval Agent",
     ["Router / Orchestrator interprets the user's intent.","Decides the request needs data retrieval first.","Hands the task to the Data Retrieval Agent.","Will orchestrate the remaining steps & state."]),
  (3,{'AGENTS','HUB'},False,TEAL,"Retrieval Agent Calls the AI Hub","Data Retrieval Agent sends the query request to the AI Hub",
     ["The agent needs a SQL query generated for it.","It forwards the request to the central AI Hub.","Every model call goes through the Hub — one control point.","The Hub will govern and protect this call."]),
- (4,{'HUB'},False,GOLD,"AI Hub Secures the Input","Token counting, guardrails, and PII redaction",
-    ["Counts input tokens for quota & cost tracking.","Runs gateway guardrails and policy checks.","Redacts PII into placeholders (name, account…).","Only the redacted prompt is sent onward to the LLM."]),
+ (4,{'HUB'},'HUB',GOLD,"AI Hub Secures the Input","🛡️ PII Guardrail — token counting, guardrails & PII redaction",
+    ["Counts input tokens for quota & cost tracking.","Runs gateway guardrails and policy checks.","PII redaction is a guardrail — real values → placeholders.","Only the redacted prompt is sent onward to the LLM."]),
  (5,{'HUB','LLM'},False,PURPLE,"LLM Generates the SQL","The provider model writes the query from the redacted prompt",
     ["The LLM receives placeholders only — never real PII.","Generates parameterized, read-only SQL.","Returns the generated SQL to the AI Hub.","Output tokens are counted as well."]),
- (6,{'HUB'},False,GOLD,"AI Hub Re-inserts PII","Real values are restored into the generated SQL",
-    ["Hub maps placeholders back to the real values.","Uses the secure mapping kept for this request.","SQL becomes executable against real data.","PII never left the trust boundary."]),
+ (6,{'HUB'},'HUB',GOLD,"AI Hub Re-inserts PII","🛡️ PII Guardrail — real values are restored into the SQL",
+    ["PII re-insertion is also a guardrail at the Hub.","Maps placeholders back to the real values.","Uses the secure mapping kept for this request.","Real PII never left the trust boundary."]),
  (7,{'HUB','AGENTS'},False,GOLD,"SQL Returns to the Agent","AI Hub sends the completed SQL back to the Retrieval Agent",
     ["The ready-to-run SQL is returned to the agent.","Retrieval Agent receives it from the Hub.","The exchange is logged and traced.","Next: execute it against the database."]),
  (8,{'AGENTS','DB'},False,GREEN,"Retrieval Agent Queries the Database","Run the SQL to fetch the customer's data",
     ["Read-only query with row-level access scope.","Returns the matching transaction rows.","No LLM is involved in data access itself.","Results are handed to the Analysis Agent."]),
  (9,{'AGENTS','HUB','LLM'},False,TEAL,"Analysis Agent Writes the Answer","Analyse the data and compose a natural-language response",
     ["Analysis Agent reviews the returned rows.","Generates the answer via AI Hub → LLM (PII-safe).","Summarises the result in clear language.","Prepares the response for delivery."]),
- (10,{'AGENTS'},True,RED,"Output Guardrail","Check the response before it leaves the system",
+ (10,{'AGENTS'},'EDGE',RED,"Output Guardrail","🛡️ Guardrail — check the response before it leaves",
     ["Scan the answer for any leaked PII.","Toxicity and safety screening.","Confirm it is grounded in the retrieved data.","Attach any required disclosures."]),
  (11,{'CLIENT'},False,BLUE,"Client Shows the Result","The user sees the final answer",
     ["Response is streamed back to the chat UI.","Presented in clear natural language.","The full interaction is logged for audit.","Session is ready for the next question."]),
@@ -293,7 +338,7 @@ def draw_example(s, n):
             {'t':"prompt: \"transactions for",'s':10,'c':INK,'f':MONO,'sa':0},
             {'t':"  Somchai J., acct 1234567890…\"",'s':10,'c':INK,'f':MONO}])
     elif n==4:
-        ix,iy,iw = card_frame(s, "🎭  PII redaction + tokens", GOLD)
+        ix,iy,iw = card_frame(s, "🛡️  PII guardrail — redact + tokens", GOLD)
         o=box(s, ix, iy, iw, 0.78, fill=WHITE, line=RED, lw=1.1, radius=0.08)
         boxtext(o,[{'t':[("IN  ",RED,True,False),("Somchai J. · acct 1234567890",INK,False,False)],'s':10}],ml=0.12)
         arrow(s, ix+iw/2, iy+0.82, ix+iw/2, iy+1.05, color=GREY, w=2.0)
@@ -306,7 +351,7 @@ def draw_example(s, n):
         codeblock(s, ix, iy, iw, SQL_PH, h=1.95)
         text(s, ix, iy+2.0, iw, 0.4, [{'t':"LLM sees placeholders only — no real PII.",'s':9.5,'c':PURPLE,'i':True}])
     elif n==6:
-        ix,iy,iw = card_frame(s, "🎭  SQL after PII re-insert", GOLD)
+        ix,iy,iw = card_frame(s, "🛡️  PII guardrail — re-insert", GOLD)
         codeblock(s, ix, iy, iw, SQL_REAL, h=1.95)
         text(s, ix, iy+2.0, iw, 0.4, [{'t':"Placeholders → real values, ready to run.",'s':9.5,'c':GREEN,'i':True}])
     elif n==7:
@@ -343,11 +388,11 @@ def draw_example(s, n):
         boxtext(bb,[{'t':"Last month, Somchai Jantapan (acct 1234567890) made 14 transactions, ฿7,950 net. Want a breakdown by channel?",'s':11,'c':INK,'a':PP_ALIGN.LEFT}],ml=0.18,mr=0.18)
 
 for (n,active,guard,accent,title,action,bullets) in STEPS:
-    s = slide(); page = 3+n
+    s = slide(); page = 4+n
     header(s, f"STEP {n} OF 11", title, page, badge=n)
-    minichain(s, active=active, guard=guard, y=1.3)
-    a=box(s,0.6,2.98,6.55,0.66,fill=accent,line=None,shadow=True,radius=0.12)
-    boxtext(a,[{'t':action,'s':12.5,'c':(NAVY if accent==GOLD else WHITE),'b':True,'a':PP_ALIGN.LEFT}],ml=0.2,mr=0.2)
+    minichain(s, active=active, guard=guard, y=1.4)
+    a=box(s,0.6,2.98,6.55,0.66,fill=accent,line=(RED if guard else None),lw=(2.0 if guard else 1.0),shadow=True,radius=0.12)
+    boxtext(a,[{'t':action,'s':12,'c':(NAVY if accent==GOLD else WHITE),'b':True,'a':PP_ALIGN.LEFT}],ml=0.2,mr=0.2)
     yy=3.88
     for b in bullets:
         icon_circle(s,0.66,yy+0.02,0.26,"•",blend(accent,0.7),accent,12)
@@ -356,11 +401,11 @@ for (n,active,guard,accent,title,action,bullets) in STEPS:
     draw_example(s, n)
 
 # ================================================================ SLIDE 15 — Security & PII
-s = slide(); header(s, "SECURITY", "Where Guardrails & PII Protection Happen", 15)
-text(s, 0.55, 1.18, 12.3, 0.35, [{'t':"Three control points keep the flow safe — PII is handled only at the AI Hub.",'s':12.5,'c':GREY,'i':True}])
+s = slide(); header(s, "SECURITY", "Guardrails Across the Flow", 16)
+text(s, 0.55, 1.18, 12.3, 0.35, [{'t':"Four guardrail points — and PII redaction & re-insertion at the AI Hub count as guardrails too.",'s':12.5,'c':GREY,'i':True}])
 cards = [
  ("🛡️","1 · Input Guardrail","at CLIENT → AGENTS",["Content & policy moderation","Prompt-injection / jailbreak checks","Scope & intent validation","No PII redaction at this step"], RED, RED_LT),
- ("🏛️","2 · AI Hub (PII boundary)","every LLM call",["Counts input / output tokens","Redacts PII before the LLM","LLM sees placeholders only","Re-inserts PII into the result"], GOLD, GOLD_LT),
+ ("🏛️","2 · PII Guardrail · AI Hub","redact + re-insert",["PII redaction = a guardrail","PII re-insertion = a guardrail","LLM sees placeholders only","Plus token counting per call"], GOLD, GOLD_LT),
  ("✅","3 · Output Guardrail","at AGENTS → CLIENT",["Checks for leaked PII","Toxicity & safety screening","Grounded / no hallucination","Required disclosures attached"], GREEN, GREEN_LT),
 ]
 cw=3.95
@@ -380,7 +425,7 @@ bn=box(s, 0.6, 5.95, 12.15, 0.78, fill=NAVY, line=None, radius=0.1)
 boxtext(bn, [{'t':[("Key point:  ",GOLD,True,False),("real customer PII reaches the LLM only as redacted placeholders — the AI Hub re-inserts the real values, so sensitive data never leaves the trust boundary.",WHITE,False,False)],'s':12}], ml=0.3, mr=0.3)
 
 # ================================================================ SLIDE 16 — Takeaways
-s = slide(); header(s, "WRAP-UP", "Key Takeaways", 16)
+s = slide(); header(s, "WRAP-UP", "Key Takeaways", 17)
 tk=[("①","One simple chain","Client → Agents → AI Hub → LLM, with the Database beside the agents.",BLUE),
     ("②","Agents do the orchestration","A Router, a Retrieval agent and an Analysis agent split the work.",TEAL),
     ("③","The AI Hub is the control point","Token counting, guardrails and PII redaction / re-insertion live here.",GOLD),
