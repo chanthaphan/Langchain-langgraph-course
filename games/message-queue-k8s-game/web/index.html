@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cluster Commander — Message Queue &amp; Kubernetes Game</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;      /* queue / primary */
+    --series-2: #1baf7a;      /* processed accent */
+    --seq-250: #86b6ef;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --good-text: #006300;
+    --modal-scrim: rgba(11,11,11,0.45);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --seq-250: #1c5cab;
+      --good-text: #0ca30c;
+      --modal-scrim: rgba(0,0,0,0.6);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 16px 16px 48px; }
+
+  header.top {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 8px 2px 14px;
+  }
+  header.top h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header.top .sub { color: var(--ink-2); font-size: 13px; }
+
+  .panel {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  /* ---- stat tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 12px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .tile .v { font-size: 24px; font-weight: 650; margin-top: 2px; }
+  .tile .d { font-size: 12px; color: var(--ink-2); }
+  .tile .v.ok    { color: var(--good-text); }
+  .tile .v.bad   { color: var(--critical); }
+
+  /* ---- layout ---- */
+  .cols { display: grid; grid-template-columns: 1fr 300px; gap: 12px; align-items: start; }
+  @media (max-width: 860px) {
+    .cols { grid-template-columns: 1fr; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* ---- pipeline ---- */
+  .pipeline { position: relative; display: grid; grid-template-columns: 130px 1fr 1.6fr; gap: 18px; min-height: 260px; }
+  .stage h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+  .stage .hint { font-size: 11.5px; color: var(--ink-2); margin-top: 8px; }
+
+  .producer-box {
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+    text-align: center; background: var(--page);
+  }
+  .producer-box .rate { font-size: 22px; font-weight: 650; }
+  .producer-box .unit { font-size: 11px; color: var(--muted); }
+
+  .queue-col { display: flex; flex-direction: column; }
+  .queue-meter {
+    position: relative; flex: 1; min-height: 170px;
+    border: 1px solid var(--baseline); border-radius: 8px;
+    background: var(--page); overflow: hidden;
+  }
+  .queue-fill {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--series-1);
+    border-radius: 0 0 7px 7px;
+    transition: height 0.5s ease;
+  }
+  .queue-fill.warn { background: var(--warning); }
+  .queue-fill.crit { background: var(--critical); }
+  .queue-label {
+    position: absolute; top: 6px; left: 0; right: 0; text-align: center;
+    font-weight: 650; font-size: 15px;
+  }
+  .queue-cap { font-size: 11.5px; color: var(--muted); text-align: center; margin-top: 6px; }
+
+  .nodes { display: flex; flex-direction: column; gap: 8px; }
+  .node {
+    border: 1px dashed var(--baseline); border-radius: 10px; padding: 8px;
+    background: var(--page);
+  }
+  .node .nlabel { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .node .slots { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pod {
+    min-width: 74px; padding: 5px 8px; border-radius: 6px;
+    font-size: 11.5px; font-weight: 600; color: #fff;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .pod.running { background: var(--good); }
+  .pod.crashed { background: var(--critical); }
+  .pod.pending { background: var(--warning); color: #3a2b00; }
+  .pod.empty   { background: transparent; border: 1px dashed var(--grid); color: var(--muted); font-weight: 400; }
+  .pending-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+
+  .dot {
+    position: absolute; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--series-1); pointer-events: none; z-index: 3;
+  }
+  .dot.out { background: var(--series-2); }
+
+  /* ---- controls ---- */
+  .controls .row { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+  .controls label { font-size: 12.5px; color: var(--ink-2); }
+  button {
+    font: inherit; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface-1); color: var(--ink);
+    padding: 7px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--series-1); }
+  button.primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+  button.small { padding: 4px 10px; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .replica-num { font-size: 20px; font-weight: 650; min-width: 34px; text-align: center; }
+  input[type="range"] { accent-color: var(--series-1); }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .switch input { accent-color: var(--series-1); width: 16px; height: 16px; }
+  .divider { border-top: 1px solid var(--grid); margin: 12px 0; }
+
+  /* ---- sparkline ---- */
+  .spark h3, .log h3, .controls h3 {
+    margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); font-weight: 600;
+  }
+  .spark svg { width: 100%; height: 90px; display: block; }
+  .spark .cap-note { font-size: 11px; color: var(--muted); }
+
+  /* ---- log ---- */
+  .log { margin-top: 12px; }
+  .log ul { list-style: none; margin: 0; padding: 0; max-height: 170px; overflow-y: auto; font-size: 12.5px; }
+  .log li { padding: 3px 0; border-bottom: 1px solid var(--grid); color: var(--ink-2); }
+  .log li.warn { color: var(--critical); }
+  .log li.good { color: var(--good-text); }
+  .log li.wave { color: var(--ink); font-weight: 650; }
+
+  /* ---- lesson modal / overlays ---- */
+  .scrim {
+    position: fixed; inset: 0; background: var(--modal-scrim);
+    display: flex; align-items: center; justify-content: center; z-index: 20;
+    padding: 20px;
+  }
+  .modal {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; max-width: 520px; width: 100%; padding: 22px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+  }
+  .modal .tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--series-1); margin-bottom: 6px;
+  }
+  .modal h2 { margin: 0 0 10px; font-size: 17px; }
+  .modal p { margin: 0 0 16px; color: var(--ink-2); font-size: 14px; }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .hidden { display: none !important; }
+
+  .wavebar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .wavebar .wlabel { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+  .wavebar .track { flex: 1; height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+  .wavebar .fillw { height: 100%; background: var(--series-1); border-radius: 4px; transition: width 0.4s ease; }
+
+  kbd {
+    font: inherit; font-size: 11px; padding: 1px 5px;
+    border: 1px solid var(--baseline); border-bottom-width: 2px; border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>⎈ Cluster Commander</h1>
+    <span class="sub">Scale LangGraph agent workers on Kubernetes to drain the task queue. Messages = LangChain invocations.</span>
+  </header>
+
+  <div class="wavebar panel" style="padding:10px 14px;">
+    <span class="wlabel" id="waveLabel">Wave 1 / 5</span>
+    <div class="track"><div class="fillw" id="waveFill" style="width:0%"></div></div>
+    <button class="small" id="pauseBtn">⏸ Pause</button>
+    <button class="small" id="stepBtn">Step ▸</button>
+    <label class="wlabel">Speed
+      <select id="speedSel" style="font:inherit;">
+        <option value="1400">Slow</option>
+        <option value="900" selected>Normal</option>
+        <option value="450">Fast</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">SLA</div><div class="v ok" id="slaV">100.0%</div><div class="d">lose below 80%</div></div>
+    <div class="tile"><div class="k">Budget</div><div class="v" id="budgetV">$400</div><div class="d" id="burnV">burn $2/tick</div></div>
+    <div class="tile"><div class="k">Queue depth</div><div class="v" id="queueV">0</div><div class="d">capacity 200</div></div>
+    <div class="tile"><div class="k">Processed</div><div class="v" id="procV">0</div><div class="d">LangChain runs</div></div>
+    <div class="tile"><div class="k">Dropped</div><div class="v" id="dropV">0</div><div class="d">lost tasks</div></div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="panel">
+        <div class="pipeline" id="pipeline">
+          <div class="stage">
+            <h3>Producers</h3>
+            <div class="producer-box" id="producerBox">
+              <div class="rate" id="rateV">~6</div>
+              <div class="unit">tasks / tick</div>
+            </div>
+            <div class="hint">Apps enqueue agent tasks. They never call workers directly.</div>
+          </div>
+          <div class="stage queue-col">
+            <h3>Queue (broker topic)</h3>
+            <div class="queue-meter" id="queueMeter">
+              <div class="queue-label" id="queueLabel">0</div>
+              <div class="queue-fill" id="queueFill" style="height:0%"></div>
+            </div>
+            <div class="queue-cap">cap 200 — overflow = dropped</div>
+          </div>
+          <div class="stage">
+            <h3>Consumer pods — LangGraph workers</h3>
+            <div class="nodes" id="nodesEl"></div>
+            <div class="pending-row" id="pendingRow"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel log">
+        <h3>Event log</h3>
+        <ul id="logEl"></ul>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel controls">
+        <h3>kubectl</h3>
+        <div class="row">
+          <label>Replicas</label>
+          <button class="small" id="downBtn">−</button>
+          <span class="replica-num" id="replicaV">1</span>
+          <button class="small" id="upBtn">+</button>
+          <span style="font-size:11.5px;color:var(--muted);" id="capNote">cap 3</span>
+        </div>
+        <div class="row">
+          <label class="switch"><input type="checkbox" id="hpaChk"> HPA autoscaler</label>
+        </div>
+        <div class="row" id="hpaRow" style="opacity:0.5">
+          <label>target depth <b id="hpaTargetV">40</b></label>
+          <input type="range" id="hpaTarget" min="10" max="150" step="5" value="40" style="flex:1" disabled>
+        </div>
+        <div class="divider"></div>
+        <div class="row">
+          <button id="nodeBtn">＋ Add node ($40)</button>
+        </div>
+        <div class="row" style="font-size:11.5px;color:var(--muted);">
+          Each node hosts 3 pods · each running pod drains 6 tasks/tick and costs $2/tick
+        </div>
+        <div class="divider"></div>
+        <div class="spark">
+          <h3>Queue depth over time</h3>
+          <svg id="sparkSvg" viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="Queue depth history line chart"></svg>
+          <div class="cap-note">dashed line = queue capacity (200)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- lesson modal -->
+<div class="scrim hidden" id="lessonScrim">
+  <div class="modal">
+    <span class="tag">Lesson</span>
+    <h2 id="lessonTitle"></h2>
+    <p id="lessonBody"></p>
+    <div class="actions"><button class="primary" id="lessonOk">Got it →</button></div>
+  </div>
+</div>
+
+<!-- end-of-game modal -->
+<div class="scrim hidden" id="endScrim">
+  <div class="modal">
+    <span class="tag" id="endTag">Result</span>
+    <h2 id="endTitle"></h2>
+    <p id="endBody"></p>
+    <div class="actions"><button class="primary" id="restartBtn">Play again ↺</button></div>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+ * Simulation core — pure logic, no DOM. (Kept DOM-free so it can be
+ * unit-tested under node: `node sim_test.js` extracts and drives this.)
+ * ========================================================================= */
+const CFG = {
+  QUEUE_CAPACITY: 200,
+  POD_THROUGHPUT: 6,
+  PODS_PER_NODE: 3,
+  POD_COST: 2,
+  NODE_COST: 40,
+  START_BUDGET: 400,
+  START_NODES: 1,
+  CRASH_CHANCE: 0.04,
+  RESTART_DELAY: 2,
+  HPA_STEP: 1,
+  WAVES: 5,
+  TICKS_PER_WAVE: 12,
+  SLA_FAIL: 80.0,
+  MAX_REPLICAS: 24,
+};
+
+const LESSONS = {
+  course_intro: ["Welcome, Cluster Commander",
+    "You're building LLM apps with LangChain & LangGraph. In production those agents don't run one at a time in a notebook — they run as containerized workers pulling tasks from a message queue on a Kubernetes cluster. Here, every message is an agent task and every pod is a LangGraph worker. Keep the queue drained through 5 traffic waves, keep your SLA above 80%, and don't go broke."],
+  queue_intro: ["Message queues 101",
+    "Producers drop work onto the queue (a broker topic) — they never call consumers directly. Consumer pods pull messages off at their own pace. This decoupling is the shock absorber that lets each side scale and fail independently."],
+  langchain: ["LangChain — what each worker runs",
+    "Every task a pod processes is one LangChain invocation: prompt → LLM → parser, often with tools or retrieval. LLM calls are slow and rate-limited — which is exactly why you queue: producers enqueue instantly, workers drain as fast as the LLM allows. Throughput = workers × chains-per-tick."],
+  backpressure: ["Backpressure",
+    "Tasks are arriving faster than your pods can process them — the growing backlog is backpressure. Add consumer pods (or slow producers) or the queue will fill and start dropping."],
+  replicas: ["Deployments & replicas",
+    "You don't start workers by hand. A Deployment declares a desired replica count and Kubernetes keeps exactly that many pods running. Scaling is changing one number — the control loop does the rest."],
+  langgraph: ["LangGraph — scaling stateful agents",
+    "Each pod runs a LangGraph app: a graph of nodes with shared state, loops, and tool calls. LangGraph checkpointing lets a task resume if a worker dies mid-run — which pairs perfectly with Kubernetes self-healing. More replicas = more copies of the same graph running in parallel."],
+  scheduling: ["Scheduling & Pending pods",
+    "Pods run on nodes, and nodes have finite capacity (3 pods each here). Ask for more pods than your nodes can host and the extras sit Pending — costing you nothing but doing nothing. Add a node to unblock them."],
+  self_healing: ["Self-healing",
+    "A pod crashed! Because the Deployment guarantees a replica count, Kubernetes will automatically restart a replacement in a couple of ticks. Design for failure: pods are cattle, not pets."],
+  hpa: ["Horizontal Pod Autoscaling",
+    "The HPA watches a metric — here, queue depth — and adjusts replicas automatically: backlog above target adds pods, a drained queue removes them. Autoscaling chases demand so you don't babysit every spike."],
+  dropped: ["Acks & data loss",
+    "The queue hit capacity and dropped a task — lost work, and an SLA hit. Brokers bound what they buffer; once full, new messages are rejected. Consumers ack only after processing so nothing is lost mid-flight — but an overflowing queue still sheds load."],
+  wave: ["Traffic waves",
+    "Production traffic comes in waves — each one ramps the producer rate higher. Capacity that was comfortable a minute ago becomes backpressure now. Scale ahead of the curve."],
+};
+
+function newGame(seedFn) {
+  return {
+    rand: seedFn || Math.random,
+    queue: 0, desired: 1, nodes: CFG.START_NODES, budget: CFG.START_BUDGET,
+    pods: [], hpaOn: false, hpaTarget: 40,
+    wave: 1, tickInWave: 0, tick: 0,
+    produced: 0, processed: 0, dropped: 0,
+    fired: {}, pendingLessons: [],
+    history: [],
+    over: false, won: false, reason: "",
+  };
+}
+
+const nodeCap = g => g.nodes * CFG.PODS_PER_NODE;
+const countState = (g, s) => g.pods.filter(p => p.state === s).length;
+const running = g => countState(g, "running");
+const pending = g => countState(g, "pending");
+const sla = g => g.produced === 0 ? 100 : 100 * (1 - g.dropped / g.produced);
+const producerBase = g => 5 + (g.wave - 1) * 5;
+
+function fireLesson(g, key) {
+  if (LESSONS[key] && !g.fired[key]) { g.fired[key] = true; g.pendingLessons.push(key); }
+}
+
+function reconcile(g) {
+  // Kubernetes control loop in miniature: match pods to desired, respect capacity.
+  while (g.pods.length > g.desired) {
+    const order = ["pending", "crashed", "running"];
+    let removed = false;
+    for (const st of order) {
+      const i = g.pods.findIndex(p => p.state === st);
+      if (i >= 0) { g.pods.splice(i, 1); removed = true; break; }
+    }
+    if (!removed) break;
+  }
+  while (g.pods.length < g.desired) g.pods.push({ state: "pending", restartIn: 0 });
+
+  let schedulable = Math.max(0, nodeCap(g) - running(g));
+  for (const p of g.pods) {
+    if (p.state === "pending" && schedulable > 0) { p.state = "running"; schedulable--; }
+  }
+  if (pending(g) > 0) fireLesson(g, "scheduling");
+}
+
+function runHpa(g) {
+  if (!g.hpaOn) return;
+  const cap = Math.min(nodeCap(g), CFG.MAX_REPLICAS);
+  if (g.queue > g.hpaTarget && g.desired < cap) {
+    g.desired = Math.min(g.desired + CFG.HPA_STEP, cap);
+    if (g.desired > 1) fireLesson(g, "langgraph");
+  } else if (g.queue < Math.floor(g.hpaTarget / 2) && g.desired > 1) {
+    g.desired = Math.max(1, g.desired - CFG.HPA_STEP);
+  }
+}
+
+function step(g) {
+  const log = [];
+  runHpa(g);
+  reconcile(g);
+
+  // 1. produce
+  const incoming = producerBase(g) + Math.floor(g.rand() * 4);
+  g.produced += incoming;
+  fireLesson(g, "queue_intro");
+  const space = CFG.QUEUE_CAPACITY - g.queue;
+  const accepted = Math.min(incoming, space);
+  const droppedNow = incoming - accepted;
+  g.queue += accepted;
+  if (droppedNow > 0) {
+    g.dropped += droppedNow;
+    log.push({ t: "warn", m: `Queue full — dropped ${droppedNow} task(s)` });
+    fireLesson(g, "dropped");
+  }
+  log.push({ t: "info", m: `Producers sent ${incoming} tasks` });
+
+  // 2. consume
+  const capacity = running(g) * CFG.POD_THROUGHPUT;
+  const processedNow = Math.min(capacity, g.queue);
+  g.queue -= processedNow;
+  g.processed += processedNow;
+  log.push({ t: "info", m: `${running(g)} pod(s) ran ${processedNow} LangChain task(s)` });
+  if (processedNow > 0) fireLesson(g, "langchain");
+  if (accepted > capacity && g.queue > g.hpaTarget) fireLesson(g, "backpressure");
+
+  // 3. crashes
+  let crashed = 0;
+  for (const p of g.pods) {
+    if (p.state === "running" && g.rand() < CFG.CRASH_CHANCE) {
+      p.state = "crashed"; p.restartIn = CFG.RESTART_DELAY; crashed++;
+    }
+  }
+  if (crashed > 0) { log.push({ t: "warn", m: `${crashed} pod(s) crashed` }); fireLesson(g, "self_healing"); }
+
+  // 4. self-heal
+  for (const p of g.pods) {
+    if (p.state === "crashed") {
+      p.restartIn--;
+      if (p.restartIn <= 0) {
+        if (running(g) < nodeCap(g)) { p.state = "running"; log.push({ t: "good", m: "Kubernetes restarted a pod" }); }
+        else p.state = "pending";
+      }
+    }
+  }
+
+  // 5. cost
+  g.budget -= running(g) * CFG.POD_COST;
+
+  // 6. clock
+  g.tick++; g.tickInWave++;
+  g.history.push(g.queue);
+  if (g.history.length > 90) g.history.shift();
+  if (g.tickInWave >= CFG.TICKS_PER_WAVE) {
+    g.tickInWave = 0;
+    if (g.wave >= CFG.WAVES) {
+      g.over = true; g.won = sla(g) >= CFG.SLA_FAIL;
+      g.reason = g.won ? "cleared" : "sla";
+    } else {
+      g.wave++;
+      log.push({ t: "wave", m: `— WAVE ${g.wave}: traffic rising —` });
+      fireLesson(g, "wave");
+    }
+  }
+
+  // 7. loss conditions
+  if (!g.over && sla(g) < CFG.SLA_FAIL && g.produced > 30) { g.over = true; g.won = false; g.reason = "sla"; }
+  if (!g.over && g.budget < 0) { g.over = true; g.won = false; g.reason = "budget"; }
+
+  return { log, incoming, processedNow };
+}
+/* ===================== end simulation core ===================== */
+</script>
+<script>
+/* =========================================================================
+ * UI layer
+ * ========================================================================= */
+const $ = id => document.getElementById(id);
+let G = newGame();
+let timer = null;
+let paused = false;
+let speed = 900;
+
+function fmt1(x) { return (Math.round(x * 10) / 10).toFixed(1); }
+
+/* ---- rendering ---- */
+function renderTiles() {
+  const s = sla(G);
+  const slaEl = $("slaV");
+  slaEl.textContent = fmt1(s) + "%";
+  slaEl.className = "v " + (s >= 95 ? "ok" : s >= CFG.SLA_FAIL ? "" : "bad");
+  const b = $("budgetV");
+  b.textContent = "$" + G.budget;
+  b.className = "v " + (G.budget < 60 ? "bad" : "");
+  $("burnV").textContent = "burn $" + (running(G) * CFG.POD_COST) + "/tick";
+  $("queueV").textContent = G.queue;
+  $("procV").textContent = G.processed;
+  $("dropV").textContent = G.dropped;
+  $("dropV").className = "v " + (G.dropped > 0 ? "bad" : "");
+  $("rateV").textContent = "~" + (producerBase(G) + 1);
+  $("waveLabel").textContent = `Wave ${G.wave} / ${CFG.WAVES}`;
+  const prog = ((G.wave - 1) * CFG.TICKS_PER_WAVE + G.tickInWave) / (CFG.WAVES * CFG.TICKS_PER_WAVE);
+  $("waveFill").style.width = (prog * 100).toFixed(1) + "%";
+  $("replicaV").textContent = G.desired;
+  $("capNote").textContent = "cap " + nodeCap(G);
+}
+
+function renderQueue() {
+  const pct = Math.min(100, 100 * G.queue / CFG.QUEUE_CAPACITY);
+  const f = $("queueFill");
+  f.style.height = pct + "%";
+  f.className = "queue-fill" + (pct >= 90 ? " crit" : pct >= 65 ? " warn" : "");
+  $("queueLabel").textContent = G.queue;
+}
+
+function renderNodes() {
+  const el = $("nodesEl");
+  el.innerHTML = "";
+  // Distribute running+crashed pods across node slots for display.
+  const placed = G.pods.filter(p => p.state !== "pending");
+  let idx = 0;
+  for (let n = 0; n < G.nodes; n++) {
+    const nd = document.createElement("div");
+    nd.className = "node";
+    nd.innerHTML = `<div class="nlabel">node-${n + 1}</div>`;
+    const slots = document.createElement("div");
+    slots.className = "slots";
+    for (let s = 0; s < CFG.PODS_PER_NODE; s++) {
+      const d = document.createElement("div");
+      if (idx < placed.length) {
+        const p = placed[idx++];
+        d.className = "pod " + p.state;
+        d.textContent = (p.state === "running" ? "▶ Running" : "✖ Crashed");
+      } else {
+        d.className = "pod empty";
+        d.textContent = "· empty";
+      }
+      slots.appendChild(d);
+    }
+    nd.appendChild(slots);
+    el.appendChild(nd);
+  }
+  const pr = $("pendingRow");
+  pr.innerHTML = "";
+  // Placed pods that didn't fit a slot (e.g. crashed pod whose slot was reused).
+  while (idx < placed.length) {
+    const p = placed[idx++];
+    const d = document.createElement("div");
+    d.className = "pod " + p.state;
+    d.textContent = (p.state === "running" ? "▶ Running" : "✖ Crashed");
+    pr.appendChild(d);
+  }
+  const nPend = pending(G);
+  for (let i = 0; i < nPend; i++) {
+    const d = document.createElement("div");
+    d.className = "pod pending";
+    d.textContent = "⏳ Pending";
+    pr.appendChild(d);
+  }
+}
+
+function renderSpark() {
+  const svg = $("sparkSvg");
+  const W = 300, H = 90, pad = 4;
+  const hist = G.history.length ? G.history : [0];
+  const n = Math.max(hist.length, 2);
+  const x = i => pad + (W - 2 * pad) * (i / (n - 1));
+  const y = v => H - pad - (H - 2 * pad) * (v / CFG.QUEUE_CAPACITY);
+  let pts = hist.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  if (hist.length === 1) pts += ` ${x(1).toFixed(1)},${y(hist[0]).toFixed(1)}`;
+  const capY = y(CFG.QUEUE_CAPACITY).toFixed(1);
+  const style = getComputedStyle(document.documentElement);
+  const line = style.getPropertyValue("--series-1").trim();
+  const gridc = style.getPropertyValue("--baseline").trim();
+  svg.innerHTML =
+    `<line x1="${pad}" y1="${capY}" x2="${W - pad}" y2="${capY}" stroke="${gridc}" stroke-width="1" stroke-dasharray="4 3"/>` +
+    `<polyline points="${pts}" fill="none" stroke="${line}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+}
+
+const MAX_LOG = 40;
+function renderLog(entries) {
+  const ul = $("logEl");
+  for (const e of entries) {
+    const li = document.createElement("li");
+    li.className = e.t;
+    li.textContent = `t${G.tick} · ${e.m}`;
+    ul.insertBefore(li, ul.firstChild);
+  }
+  while (ul.children.length > MAX_LOG) ul.removeChild(ul.lastChild);
+}
+
+function renderAll(logEntries) {
+  renderTiles(); renderQueue(); renderNodes(); renderSpark();
+  if (logEntries) renderLog(logEntries);
+}
+
+/* ---- flying dots animation ---- */
+function centerOf(el, container) {
+  const r = el.getBoundingClientRect(), c = container.getBoundingClientRect();
+  return { x: r.left - c.left + r.width / 2, y: r.top - c.top + r.height / 2 };
+}
+function spawnDots(fromEl, toEl, n, cls) {
+  const pipe = $("pipeline");
+  if (!fromEl || !toEl) return;
+  const a = centerOf(fromEl, pipe), b = centerOf(toEl, pipe);
+  const count = Math.min(n, 6);
+  for (let i = 0; i < count; i++) {
+    const d = document.createElement("div");
+    d.className = "dot " + (cls || "");
+    d.style.left = a.x + "px"; d.style.top = a.y + "px";
+    pipe.appendChild(d);
+    const jitterY = (Math.random() - 0.5) * 30;
+    d.animate(
+      [{ transform: "translate(0,0)", opacity: 0.9 },
+       { transform: `translate(${b.x - a.x}px, ${b.y - a.y + jitterY}px)`, opacity: 0.2 }],
+      { duration: Math.min(speed * 0.8, 700), delay: i * 60, easing: "ease-in", fill: "forwards" }
+    ).onfinish = () => d.remove();
+  }
+}
+
+/* ---- lessons ---- */
+let lessonOpen = false;
+function maybeShowLesson() {
+  if (lessonOpen || G.pendingLessons.length === 0) return;
+  const key = G.pendingLessons.shift();
+  const [title, body] = LESSONS[key];
+  $("lessonTitle").textContent = title;
+  $("lessonBody").textContent = body;
+  $("lessonScrim").classList.remove("hidden");
+  lessonOpen = true;
+  stopTimer();
+}
+$("lessonOk").addEventListener("click", () => {
+  $("lessonScrim").classList.add("hidden");
+  lessonOpen = false;
+  if (G.pendingLessons.length) { maybeShowLesson(); return; }
+  if (!G.over && !paused) startTimer();
+});
+
+/* ---- end game ---- */
+function showEnd() {
+  stopTimer();
+  const s = fmt1(sla(G));
+  $("endTag").textContent = G.won ? "Victory" : "Game over";
+  $("endTitle").textContent = G.won ? "🎉 All 5 waves cleared!" :
+    G.reason === "budget" ? "💸 Out of budget" : "📉 SLA collapsed";
+  $("endBody").textContent = G.won
+    ? `You kept the SLA at ${s}% with $${G.budget} to spare. Your cluster scaled with demand — queues absorbed the spikes, HPA and replicas did the rest. That's production thinking.`
+    : `Final SLA ${s}%, ${G.dropped} tasks dropped. Tip: scale pods (or enable HPA) before the backlog nears capacity, and add nodes so pods aren't stuck Pending — but watch the burn rate.`;
+  $("endScrim").classList.remove("hidden");
+}
+$("restartBtn").addEventListener("click", () => {
+  $("endScrim").classList.add("hidden");
+  const fired = {}; // keep lessons already seen so replays aren't interrupted
+  Object.keys(G.fired).forEach(k => fired[k] = true);
+  G = newGame(); G.fired = fired;
+  paused = false;
+  $("pauseBtn").textContent = "⏸ Pause";
+  syncControls(); renderAll(); startTimer();
+});
+
+/* ---- game loop ---- */
+function doTick() {
+  if (G.over) return;
+  const { log, incoming, processedNow } = step(G);
+  spawnDots($("producerBox"), $("queueMeter"), Math.ceil(incoming / 3), "");
+  if (processedNow > 0) spawnDots($("queueMeter"), $("nodesEl"), Math.ceil(processedNow / 4), "out");
+  renderAll(log);
+  if (G.over) { renderAll(); showEnd(); return; }
+  maybeShowLesson();
+}
+function startTimer() { stopTimer(); timer = setInterval(doTick, speed); }
+function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+
+/* ---- controls ---- */
+function syncControls() {
+  $("hpaChk").checked = G.hpaOn;
+  $("hpaTarget").disabled = !G.hpaOn;
+  $("hpaRow").style.opacity = G.hpaOn ? "1" : "0.5";
+  $("hpaTarget").value = G.hpaTarget;
+  $("hpaTargetV").textContent = G.hpaTarget;
+  renderAll();
+}
+$("upBtn").addEventListener("click", () => {
+  G.desired = Math.min(G.desired + 1, CFG.MAX_REPLICAS);
+  fireLesson(G, "replicas");
+  if (G.desired > 1) fireLesson(G, "langgraph");
+  reconcile(G); renderAll(); maybeShowLesson();
+});
+$("downBtn").addEventListener("click", () => {
+  G.desired = Math.max(0, G.desired - 1);
+  reconcile(G); renderAll();
+});
+$("hpaChk").addEventListener("change", e => {
+  G.hpaOn = e.target.checked;
+  if (G.hpaOn) fireLesson(G, "hpa");
+  syncControls(); maybeShowLesson();
+});
+$("hpaTarget").addEventListener("input", e => {
+  G.hpaTarget = +e.target.value;
+  $("hpaTargetV").textContent = G.hpaTarget;
+});
+$("nodeBtn").addEventListener("click", () => {
+  if (G.budget >= CFG.NODE_COST) {
+    G.budget -= CFG.NODE_COST; G.nodes++;
+    renderLog([{ t: "good", m: "Added a node (+3 pod capacity)" }]);
+    reconcile(G); renderAll();
+  } else {
+    renderLog([{ t: "warn", m: "Not enough budget for a node" }]);
+  }
+});
+$("pauseBtn").addEventListener("click", () => {
+  paused = !paused;
+  $("pauseBtn").textContent = paused ? "▶ Resume" : "⏸ Pause";
+  if (paused) stopTimer(); else if (!lessonOpen && !G.over) startTimer();
+});
+$("stepBtn").addEventListener("click", () => { if (!lessonOpen && !G.over) doTick(); });
+$("speedSel").addEventListener("change", e => {
+  speed = +e.target.value;
+  if (timer) startTimer();
+});
+window.addEventListener("keydown", e => {
+  if (lessonOpen) { if (e.key === "Enter" || e.key === " ") $("lessonOk").click(); return; }
+  if (e.key === "+" || e.key === "=") $("upBtn").click();
+  if (e.key === "-") $("downBtn").click();
+  if (e.key === "n") $("nodeBtn").click();
+  if (e.key === "h") $("hpaChk").click();
+  if (e.key === "p" || e.key === " ") { e.preventDefault(); $("pauseBtn").click(); }
+});
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderSpark());
+
+/* ---- boot ---- */
+fireLesson(G, "course_intro");
+syncControls();
+renderAll();
+maybeShowLesson();   // opens the intro lesson; timer starts on dismiss
+</script>
+</body>
+</html>

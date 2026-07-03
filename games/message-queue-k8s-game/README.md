@@ -13,6 +13,23 @@ It's pure Python standard library — **nothing to install.**
 
 ## Run it
 
+**🌐 Web version (recommended)** — open [`web/index.html`](web/index.html) in any
+browser. No server, no install: a real-time animated dashboard with flying task
+dots, a live queue meter, node/pod visualization, a queue-depth sparkline, and
+clickable controls (scale ± / HPA toggle + target slider / add node / pause /
+speed). Lessons appear as popups the first time each concept triggers.
+
+```bash
+# from the repo root — open directly, or serve it:
+open games/message-queue-k8s-game/web/index.html        # macOS
+xdg-open games/message-queue-k8s-game/web/index.html    # Linux
+```
+
+Keyboard shortcuts: <kbd>+</kbd>/<kbd>−</kbd> scale replicas · <kbd>n</kbd> add
+node · <kbd>h</kbd> toggle HPA · <kbd>space</kbd> pause.
+
+**💻 Terminal version** — the same simulation as a turn-based CLI:
+
 ```bash
 cd games/message-queue-k8s-game
 python3 game.py            # interactive play
@@ -62,8 +79,9 @@ scaling your agents horizontally.
 
 ## Files
 
-- `game.py` — simulation engine, dashboard, and command loop
-- `lessons.py` — the lesson content shown during play
+- `web/index.html` — the interactive web app (self-contained HTML/CSS/JS, zero dependencies)
+- `game.py` — the terminal version: simulation engine, dashboard, and command loop
+- `lessons.py` — the lesson content shown by the terminal version
 
 ## Note
 

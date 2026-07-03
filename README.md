@@ -4,11 +4,18 @@
 
 ### 🎮 Cluster Commander — Message Queue & Kubernetes game
 
-A pure-Python terminal game for learning **message queues**, **Kubernetes**, and how
-they tie back to **LangChain / LangGraph** — by running a system, not just reading
-about one. You scale consumer pods (LangGraph agent workers) on a cluster to drain a
+An interactive game for learning **message queues**, **Kubernetes**, and how they
+tie back to **LangChain / LangGraph** — by running a system, not just reading about
+one. You scale consumer pods (LangGraph agent workers) on a cluster to drain a
 message queue through escalating traffic waves, with lessons that pop up as each
 concept first becomes relevant.
+
+**🌐 Web version** — open
+[`games/message-queue-k8s-game/web/index.html`](games/message-queue-k8s-game/web/index.html)
+in any browser (self-contained, zero dependencies): animated real-time dashboard,
+live queue meter, node/pod view, HPA slider, and lesson popups.
+
+**💻 Terminal version** — the same simulation as a turn-based CLI:
 
 ```bash
 cd games/message-queue-k8s-game
